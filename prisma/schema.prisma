@@ -1,0 +1,1008 @@
+// Schéma Prisma — dps.bj
+// Phase V1 : tronc commun (organisations, utilisateurs, services, audit)
+//            + Module 1 (Auto-évaluation : grilles/domaines/normes/critères/éléments mesurables,
+//            sessions/réponses/rapports PDF)
+// Voir ROADMAP.md section 4 pour le phasage complet.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum TypeCompte {
+  ORGANISATION
+  INDIVIDUEL
+  ADMIN_PLATEFORME
+
+  @@map("type_compte")
+}
+
+enum RoleUtilisateur {
+  RESPONSABLE_COMPTE
+  RESP_QUALITE
+  PERSONNEL_SOIGNANT
+  GESTIONNAIRE_FORMATION
+  ADMIN_PLATEFORME
+
+  @@map("role_utilisateur")
+}
+
+enum TypeEtablissement {
+  EH
+  ESPC
+
+  @@map("type_etablissement")
+}
+
+// §4.1 — civilité du responsable / des utilisateurs internes.
+enum Civilite {
+  M
+  MME
+
+  @@map("civilite")
+}
+
+// §4.1 — type d'établissement (distinct de la catégorie ARS EH/ESPC, portée par
+// Organisation.type). Liste reprise du CDC ("hôpital, clinique, laboratoire,
+// pharmacie, cabinet médical, etc.") + AUTRE pour le "etc.".
+enum TypeStructure {
+  HOPITAL
+  CLINIQUE
+  LABORATOIRE
+  PHARMACIE
+  CABINET_MEDICAL
+  AUTRE
+
+  @@map("type_structure")
+}
+
+enum StatutGrille {
+  BROUILLON
+  PUBLIEE
+  ARCHIVEE
+
+  @@map("statut_grille")
+}
+
+enum StatutSessionEvaluation {
+  EN_COURS
+  SOUMISE
+
+  @@map("statut_session_evaluation")
+}
+
+enum TypeReponse {
+  OUI_NON
+  TEXTE
+  CHOIX
+
+  @@map("type_reponse")
+}
+
+// §6.2 / §6.6 — nature d'un élément mesurable de la grille officielle.
+enum TypeElementMesurable {
+  DOCUMENT_A_EXAMINER
+  ENTRETIEN
+  OBSERVATION
+
+  @@map("type_element_mesurable")
+}
+
+enum StatutRapportPdf {
+  EN_COURS
+  DISPONIBLE
+  ECHEC
+
+  @@map("statut_rapport_pdf")
+}
+
+enum ModuleMetier {
+  NEWS
+  EI
+
+  @@map("module_metier")
+}
+
+enum StatutAbonnement {
+  ESSAI
+  ACTIF
+  EXPIRE
+  // §12.1 — suspendu manuellement par l'administrateur.
+  SUSPENDU
+
+  @@map("statut_abonnement")
+}
+
+// §5 / §10.4 — demande de paiement d'un abonnement NEWS / EI.
+enum StatutPaiementAbonnement {
+  EN_ATTENTE
+  PAYE
+
+  @@map("statut_paiement_abonnement")
+}
+
+enum StatutPatient {
+  HOSPITALISE
+  SORTI
+
+  @@map("statut_patient")
+}
+
+// Échelle ACVPU standard (utilisée par le score NEWS2).
+enum NiveauConscience {
+  ALERTE
+  CONFUSION
+  VOIX
+  DOULEUR
+  INCONSCIENT
+
+  @@map("niveau_conscience")
+}
+
+enum NiveauRisqueNews {
+  BAS
+  MOYEN
+  ELEVE
+
+  @@map("niveau_risque_news")
+}
+
+enum StatutAlerte {
+  OUVERTE
+  EN_COURS
+  CLOTUREE
+
+  @@map("statut_alerte")
+}
+
+// §8.2 / §8.5 — circuit de traitement d'un EI.
+enum StatutEi {
+  DECLARE
+  QUALIFIE
+  EN_ANALYSE
+  PLAN_ACTION
+  CLOTURE
+
+  @@map("statut_ei")
+}
+
+// §8.2 — priorisation à la qualification.
+enum PrioriteEi {
+  BASSE
+  NORMALE
+  HAUTE
+
+  @@map("priorite_ei")
+}
+
+enum TypeCause {
+  IMMEDIATE
+  PROFONDE
+
+  @@map("type_cause")
+}
+
+enum StatutActionCorrective {
+  A_FAIRE
+  EN_COURS
+  REALISEE
+
+  @@map("statut_action_corrective")
+}
+
+enum FormuleFormation {
+  INDIVIDUEL
+  GROUPE_5
+  GROUPE_10
+
+  @@map("formule_formation")
+}
+
+enum StatutReservation {
+  ATTENTE_PAIEMENT
+  PAYEE
+  CONFIRMEE
+  REALISEE
+  ANNULEE
+
+  @@map("statut_reservation")
+}
+
+// ---------------------------------------------------------------------------
+// Tronc commun
+// ---------------------------------------------------------------------------
+
+model Organisation {
+  id        String            @id @default(cuid())
+  nom       String
+  // §4.1 — raison sociale, type de structure, ville et pays. Nullables : les
+  // organisations inscrites avant cette migration n'en ont pas.
+  raisonSociale String?        @map("raison_sociale")
+  typeStructure TypeStructure? @map("type_structure")
+  ifu       String            @unique
+  // Catégorie ARS (EH / ESPC).
+  type      TypeEtablissement
+  adresse   String?
+  ville     String?
+  pays      String?
+  telephone String?
+  email     String?           @unique
+  actif     Boolean           @default(true)
+  createdAt DateTime          @default(now()) @map("created_at")
+  updatedAt DateTime          @updatedAt @map("updated_at")
+
+  utilisateurs       Utilisateur[]
+  services           Service[]
+  journalAudit       JournalAudit[]
+  sessionsEvaluation SessionEvaluation[]
+  abonnementsModule  AbonnementModule[]
+  paiementsAbonnement PaiementAbonnement[]
+  patients           Patient[]
+  alertes            Alerte[]
+  evenementsIndesirables EvenementIndesirable[]
+  reservations       Reservation[]
+
+  @@map("organisations")
+}
+
+model Utilisateur {
+  id             String      @id @default(cuid())
+  organisationId String?     @map("organisation_id")
+  serviceId      String?     @map("service_id")
+  typeCompte     TypeCompte  @map("type_compte")
+  civilite       Civilite?
+  email          String      @unique
+  motDePasseHash String      @map("mot_de_passe_hash")
+  nom            String
+  prenom         String
+  telephone      String?
+  actif          Boolean     @default(true)
+  emailVerifieLe DateTime?   @map("email_verifie_le")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  organisation Organisation?     @relation(fields: [organisationId], references: [id])
+  service      Service?          @relation(fields: [serviceId], references: [id])
+  roles        UtilisateurRole[]
+  journalAudit JournalAudit[]
+  emailVerificationTokens EmailVerificationToken[]
+
+  sessionsDemarrees SessionEvaluation[] @relation("SessionDemarreePar")
+  sessionsSoumises  SessionEvaluation[] @relation("SessionSoumisePar")
+
+  refreshTokens        RefreshToken[]
+  passwordResetTokens  PasswordResetToken[]
+
+  mesuresSaisies MesureNews[]
+  correctionsMesures CorrectionMesureNews[]
+  correctionsEi      CorrectionEi[]
+  paiementsAbonnement PaiementAbonnement[]
+  interventions  Intervention[]
+
+  evenementsDeclares      EvenementIndesirable[] @relation("EiDeclarePar")
+  actionsCorrectivesAFaire ActionCorrective[]
+  transitionsEi           EvenementTransition[]
+  reservations            Reservation[]
+  notifications           Notification[]
+
+  @@index([organisationId])
+  @@index([serviceId])
+  @@map("utilisateurs")
+}
+
+// RM — un refresh token est stocké haché (jamais en clair) pour permettre
+// son invalidation côté serveur à la déconnexion (5.4) sans dépendre
+// uniquement de l'expiration JWT.
+model RefreshToken {
+  id            String    @id @default(cuid())
+  utilisateurId String    @map("utilisateur_id")
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at")
+  revokedAt     DateTime? @map("revoked_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@index([utilisateurId])
+  @@map("refresh_tokens")
+}
+
+model PasswordResetToken {
+  id            String    @id @default(cuid())
+  utilisateurId String    @map("utilisateur_id")
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@index([utilisateurId])
+  @@map("password_reset_tokens")
+}
+
+model EmailVerificationToken {
+  id            String    @id @default(cuid())
+  utilisateurId String    @map("utilisateur_id")
+  tokenHash     String    @unique @map("token_hash")
+  expiresAt     DateTime  @map("expires_at")
+  usedAt        DateTime? @map("used_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@index([utilisateurId])
+  @@map("email_verification_tokens")
+}
+
+model UtilisateurRole {
+  id            String          @id @default(cuid())
+  utilisateurId String          @map("utilisateur_id")
+  role          RoleUtilisateur
+  createdAt     DateTime        @default(now()) @map("created_at")
+
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+
+  @@unique([utilisateurId, role])
+  @@map("utilisateur_roles")
+}
+
+model Service {
+  id             String   @id @default(cuid())
+  organisationId String   @map("organisation_id")
+  nom            String
+  description    String?
+  // Un service référencé par des patients/EI n'est jamais supprimé, seulement désactivé.
+  actif          Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  organisation Organisation  @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  patients     Patient[]
+  utilisateurs Utilisateur[]
+  evenementsIndesirables EvenementIndesirable[]
+
+  @@unique([organisationId, nom])
+  @@index([organisationId])
+  @@map("services")
+}
+
+// Journal d'audit générique (connexions, modifications de compte, etc.).
+// Les historisations métier spécifiques (transitions EI, corrections NEWS)
+// auront leurs propres tables dédiées en phase V2 (RM4, RM8).
+model JournalAudit {
+  id             String   @id @default(cuid())
+  organisationId String?  @map("organisation_id")
+  utilisateurId  String?  @map("utilisateur_id")
+  action         String
+  entite         String
+  entiteId       String?  @map("entite_id")
+  donneesAvant   Json?    @map("donnees_avant")
+  donneesApres   Json?    @map("donnees_apres")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  organisation Organisation? @relation(fields: [organisationId], references: [id])
+  utilisateur  Utilisateur?  @relation(fields: [utilisateurId], references: [id])
+
+  @@index([organisationId])
+  @@index([entite, entiteId])
+  @@map("journal_audit")
+}
+
+// ---------------------------------------------------------------------------
+// Module 1 — Auto-évaluation : référentiel (grilles), global, non scopé par organisation
+// ---------------------------------------------------------------------------
+
+model Grille {
+  id          String            @id @default(cuid())
+  nom         String
+  type        TypeEtablissement
+  version     Int
+  statut      StatutGrille      @default(BROUILLON)
+  publieeLe   DateTime?         @map("publiee_le")
+  createdAt   DateTime          @default(now()) @map("created_at")
+  updatedAt   DateTime          @updatedAt @map("updated_at")
+
+  domaines           Domaine[]
+  sessionsEvaluation SessionEvaluation[]
+
+  @@unique([nom, version])
+  @@map("grilles")
+}
+
+model Domaine {
+  id        String   @id @default(cuid())
+  grilleId  String   @map("grille_id")
+  nom       String
+  ordre     Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  grille  Grille  @relation(fields: [grilleId], references: [id], onDelete: Cascade)
+  normes  Norme[]
+
+  @@index([grilleId])
+  @@map("domaines")
+}
+
+model Norme {
+  id        String   @id @default(cuid())
+  domaineId String   @map("domaine_id")
+  code      String
+  libelle   String
+  ordre     Int
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  domaine  Domaine   @relation(fields: [domaineId], references: [id], onDelete: Cascade)
+  criteres Critere[]
+
+  @@index([domaineId])
+  @@map("normes")
+}
+
+// RM1 — un critère n'est validé que si tous ses éléments mesurables
+// (documents à examiner) rattachés sont positifs.
+model Critere {
+  id        String   @id @default(cuid())
+  normeId   String   @map("norme_id")
+  code      String
+  libelle   String
+  ordre     Int
+  // §6.6 — catégorie du critère (ex. « essentiel »), libre faute de liste fermée dans le CDC.
+  categorie      String?
+  // §6.4 — recommandation synthétique affichée quand le critère est en écart.
+  recommandation String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  norme             Norme              @relation(fields: [normeId], references: [id], onDelete: Cascade)
+  elementsMesurables ElementMesurable[]
+  evenementsIndesirables EvenementIndesirable[]
+
+  @@index([normeId])
+  @@map("criteres")
+}
+
+model ElementMesurable {
+  id        String      @id @default(cuid())
+  critereId String      @map("critere_id")
+  libelle   String
+  typeReponse TypeReponse @default(OUI_NON) @map("type_reponse")
+  optionsChoix Json?      @map("options_choix")
+  // §6.2 / §6.6 — seuls les éléments « document à examiner » entrent dans le score.
+  typeElement    TypeElementMesurable @default(DOCUMENT_A_EXAMINER) @map("type_element")
+  entreDansScore Boolean              @default(true) @map("entre_dans_score")
+  ordre     Int
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  critere   Critere    @relation(fields: [critereId], references: [id], onDelete: Cascade)
+  reponses  Reponse[]
+
+  @@index([critereId])
+  @@map("elements_mesurables")
+}
+
+// ---------------------------------------------------------------------------
+// Module 1 — Auto-évaluation : sessions (scopées par organisation)
+// ---------------------------------------------------------------------------
+
+// RM2 — score calculé côté serveur uniquement.
+// RM3 — référence une version figée de la grille (grilleId), immuable après soumission.
+model SessionEvaluation {
+  id               String                  @id @default(cuid())
+  organisationId   String                  @map("organisation_id")
+  grilleId         String                  @map("grille_id")
+  demarreeParId    String                  @map("demarree_par_id")
+  soumiseParId     String?                 @map("soumise_par_id")
+  statut           StatutSessionEvaluation @default(EN_COURS)
+  scoreGlobal      Float?                  @map("score_global")
+  dateDebut        DateTime                @default(now()) @map("date_debut")
+  dateSoumission   DateTime?               @map("date_soumission")
+  createdAt        DateTime                @default(now()) @map("created_at")
+  updatedAt        DateTime                @updatedAt @map("updated_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  grille       Grille       @relation(fields: [grilleId], references: [id])
+  demarreePar  Utilisateur  @relation("SessionDemarreePar", fields: [demarreeParId], references: [id])
+  soumisePar   Utilisateur? @relation("SessionSoumisePar", fields: [soumiseParId], references: [id])
+
+  reponses   Reponse[]
+  rapportPdf RapportPdf?
+
+  @@index([organisationId])
+  @@index([grilleId])
+  @@map("sessions_evaluation")
+}
+
+model Reponse {
+  id                 String   @id @default(cuid())
+  sessionId          String   @map("session_id")
+  elementMesurableId String   @map("element_mesurable_id")
+  valeur             Json
+  commentaire        String?
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  session          SessionEvaluation @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  elementMesurable ElementMesurable  @relation(fields: [elementMesurableId], references: [id])
+
+  @@unique([sessionId, elementMesurableId])
+  @@index([sessionId])
+  @@map("reponses")
+}
+
+// §6.4 / §6.6 — rapport de synthèse généré en tâche asynchrone : la ligne
+// EN_COURS sert de file d'attente, traitée par RapportsPdfScheduler. Le PDF
+// est conservé en base (accès authentifié, jamais une URL publique).
+model RapportPdf {
+  id         String           @id @default(cuid())
+  sessionId  String           @unique @map("session_id")
+  statut     StatutRapportPdf @default(EN_COURS)
+  url        String?
+  contenu    Bytes?           @db.LongBlob
+  tentatives Int              @default(0)
+  erreur     String?          @db.Text
+  genereLe   DateTime?        @map("genere_le")
+  createdAt  DateTime         @default(now()) @map("created_at")
+  updatedAt  DateTime         @updatedAt @map("updated_at")
+
+  session SessionEvaluation @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("rapports_pdf")
+}
+
+// ---------------------------------------------------------------------------
+// Module 2 — Score NEWS (RM6 : essai 3 mois puis payant, RM9 : alerte auto)
+// ---------------------------------------------------------------------------
+
+// RM6 — un abonnement par organisation et par module payant (NEWS, EI).
+model AbonnementModule {
+  id             String           @id @default(cuid())
+  organisationId String           @map("organisation_id")
+  module         ModuleMetier
+  statut         StatutAbonnement @default(ESSAI)
+  essaiDebut     DateTime         @map("essai_debut")
+  essaiFin       DateTime         @map("essai_fin")
+  activeLe       DateTime?        @map("active_le")
+  // §7.5 — date d'expiration de l'abonnement payant.
+  expireLe       DateTime?        @map("expire_le")
+  // §11.2 — rappel avant expiration de l'essai déjà envoyé (remis à zéro si prolongé).
+  rappelExpirationEnvoyeLe DateTime? @map("rappel_expiration_envoye_le")
+  statutAvantSuspension StatutAbonnement? @map("statut_avant_suspension")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+
+  @@unique([organisationId, module])
+  @@map("abonnements_module")
+}
+
+// §5 / §10.4 — paiement d'un abonnement : tarif et durée figés à la demande
+// (comme RM5), confirmé après vérification serveur KKiaPay (RM11).
+model PaiementAbonnement {
+  id                   String                   @id @default(cuid())
+  organisationId       String                   @map("organisation_id")
+  module               ModuleMetier
+  montant              Int
+  dureeJours           Int                      @map("duree_jours")
+  devise               String                   @default("XOF")
+  statut               StatutPaiementAbonnement @default(EN_ATTENTE)
+  kkiapayTransactionId String?                  @unique @map("kkiapay_transaction_id")
+  demandeParId         String                   @map("demande_par_id")
+  payeLe               DateTime?                @map("paye_le")
+  createdAt            DateTime                 @default(now()) @map("created_at")
+  updatedAt            DateTime                 @updatedAt @map("updated_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  demandePar   Utilisateur  @relation(fields: [demandeParId], references: [id])
+  facture      Facture?
+
+  @@index([organisationId])
+  @@map("paiements_abonnement")
+}
+
+// §7.1 / §3.3 — fiche patient minimale : identifiant interne, service, n° de
+// lit. Les colonnes d'identité (nom, prénom, date de naissance, sexe, n° de
+// dossier) sont conservées en base pour ne détruire aucune donnée existante,
+// mais ne sont plus ni saisies ni renvoyées par l'API (SELECTION_PATIENT).
+model Patient {
+  id                 String        @id @default(cuid())
+  organisationId     String        @map("organisation_id")
+  serviceId          String?       @map("service_id")
+  identifiantInterne String        @map("identifiant_interne")
+  numeroLit          String?       @map("numero_lit")
+  nom            String?
+  prenom         String?
+  dateNaissance  DateTime?     @map("date_naissance")
+  sexe           String?
+  numeroDossier  String?       @map("numero_dossier")
+  statut         StatutPatient @default(HOSPITALISE)
+  dateAdmission  DateTime      @default(now()) @map("date_admission")
+  dateSortie     DateTime?     @map("date_sortie")
+  createdAt      DateTime      @default(now()) @map("created_at")
+  updatedAt      DateTime      @updatedAt @map("updated_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  service      Service?     @relation(fields: [serviceId], references: [id])
+  mesures      MesureNews[]
+  alertes      Alerte[]
+
+  @@index([organisationId])
+  @@index([organisationId, identifiantInterne])
+  @@index([serviceId])
+  @@map("patients")
+}
+
+// RM2 (équivalent NEWS) — score et niveau de risque calculés côté serveur uniquement.
+// Paramètres et seuils : échelle NEWS2 standard (Royal College of Physicians),
+// scale 1 pour la SpO2 (pas de prise en charge distincte BPCO pour l'instant).
+model MesureNews {
+  id                           String           @id @default(cuid())
+  patientId                    String           @map("patient_id")
+  saisieParId                  String           @map("saisie_par_id")
+  frequenceRespiratoire        Int              @map("frequence_respiratoire")
+  saturationOxygene            Int              @map("saturation_oxygene")
+  oxygenoSupplementation       Boolean          @map("oxygeno_supplementation")
+  temperature                  Float
+  pressionArterielleSystolique Int              @map("pression_arterielle_systolique")
+  frequenceCardiaque           Int              @map("frequence_cardiaque")
+  niveauConscience             NiveauConscience @map("niveau_conscience")
+  scoreTotal                   Int              @map("score_total")
+  niveauRisque                 NiveauRisqueNews @map("niveau_risque")
+  // §7.3 — fréquence de surveillance suggérée au moment de la mesure (figée).
+  frequenceSurveillance        String?          @map("frequence_surveillance")
+  dateMesure                   DateTime         @default(now()) @map("date_mesure")
+  createdAt                    DateTime         @default(now()) @map("created_at")
+
+  patient     Patient                @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  saisiePar   Utilisateur            @relation(fields: [saisieParId], references: [id])
+  alerte      Alerte?
+  corrections CorrectionMesureNews[]
+
+  @@index([patientId])
+  @@map("mesures_news")
+}
+
+// §13.4 — correction tracée d'une mesure NEWS : horodatage, motif, auteur,
+// valeurs avant/après. La mesure n'est jamais supprimée.
+model CorrectionMesureNews {
+  id           String   @id @default(cuid())
+  mesureId     String   @map("mesure_id")
+  auteurId     String   @map("auteur_id")
+  motif        String   @db.Text
+  valeursAvant Json     @map("valeurs_avant")
+  valeursApres Json     @map("valeurs_apres")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  mesure MesureNews  @relation(fields: [mesureId], references: [id], onDelete: Cascade)
+  auteur Utilisateur @relation(fields: [auteurId], references: [id])
+
+  @@index([mesureId])
+  @@map("corrections_mesures_news")
+}
+
+// RM9 — alerte automatique si niveau de risque MOYEN ou ELEVE.
+model Alerte {
+  id             String           @id @default(cuid())
+  organisationId String           @map("organisation_id")
+  patientId      String           @map("patient_id")
+  mesureId       String           @unique @map("mesure_id")
+  niveauRisque   NiveauRisqueNews @map("niveau_risque")
+  statut         StatutAlerte     @default(OUVERTE)
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  organisation  Organisation   @relation(fields: [organisationId], references: [id])
+  patient       Patient        @relation(fields: [patientId], references: [id], onDelete: Cascade)
+  mesure        MesureNews     @relation(fields: [mesureId], references: [id])
+  interventions Intervention[]
+
+  @@index([organisationId])
+  @@index([patientId])
+  @@map("alertes")
+}
+
+// 7.7 — journal d'intervention suite à une alerte.
+model Intervention {
+  id            String   @id @default(cuid())
+  alerteId      String   @map("alerte_id")
+  utilisateurId String   @map("utilisateur_id")
+  note          String   @db.Text
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  alerte      Alerte      @relation(fields: [alerteId], references: [id], onDelete: Cascade)
+  utilisateur Utilisateur @relation(fields: [utilisateurId], references: [id])
+
+  @@index([alerteId])
+  @@map("interventions")
+}
+
+// ---------------------------------------------------------------------------
+// Module 3 — Événements indésirables (RM4 : append-only, RM8 : historisation
+// des transitions, RM9 : alerte sur gravité élevée, RM10 : lien EI -> critère
+// auto-évaluation optionnel et sans effet sur le score)
+// ---------------------------------------------------------------------------
+
+// §8.1 / §12.4 — échelle de gravité paramétrable par l'administrateur.
+// `critique` = gravité élevée : déclenche l'alerte immédiate (§8.3). Un niveau
+// déjà utilisé n'est jamais modifié ni supprimé, seulement désactivé (§13.5).
+model NiveauGraviteEi {
+  id        String   @id @default(cuid())
+  libelle   String   @unique
+  ordre     Int
+  critique  Boolean  @default(false)
+  actif     Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  evenements EvenementIndesirable[]
+
+  @@map("niveaux_gravite_ei")
+}
+
+// Référentiel global (comme les grilles), géré par l'admin plateforme (8.17).
+model TypeEi {
+  id        String   @id @default(cuid())
+  libelle   String   @unique
+  actif     Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  evenements EvenementIndesirable[]
+
+  @@map("types_ei")
+}
+
+model EvenementIndesirable {
+  id              String    @id @default(cuid())
+  organisationId  String    @map("organisation_id")
+  typeEiId        String?   @map("type_ei_id")
+  serviceId       String?   @map("service_id")
+  critereId       String?   @map("critere_id")
+  declareParId    String    @map("declare_par_id")
+  // §8.1 — date et heure de survenue, lieu (si pas de service), personnes
+  // impliquées ou témoins (obligatoire), gravité dès la déclaration.
+  dateSurvenue        DateTime    @map("date_survenue")
+  lieu                String?
+  personnesImpliquees String      @db.Text @map("personnes_impliquees")
+  niveauGraviteId     String?     @map("niveau_gravite_id")
+  // §8.2 — priorisation à la qualification.
+  priorite            PrioriteEi?
+  description     String    @db.Text
+  statut          StatutEi  @default(DECLARE)
+  dateDeclaration DateTime  @default(now()) @map("date_declaration")
+  dateCloture     DateTime? @map("date_cloture")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+
+  organisation Organisation @relation(fields: [organisationId], references: [id])
+  typeEi       TypeEi?      @relation(fields: [typeEiId], references: [id])
+  service      Service?     @relation(fields: [serviceId], references: [id])
+  critere      Critere?     @relation(fields: [critereId], references: [id])
+  declarePar   Utilisateur  @relation("EiDeclarePar", fields: [declareParId], references: [id])
+  niveauGravite NiveauGraviteEi? @relation(fields: [niveauGraviteId], references: [id])
+
+  corrections        CorrectionEi[]
+  causes             Cause[]
+  actionsCorrectives ActionCorrective[]
+  transitions        EvenementTransition[]
+  piecesJointes      PieceJointe[]
+
+  @@index([organisationId])
+  @@index([serviceId])
+  @@index([statut])
+  @@index([niveauGraviteId])
+  @@map("evenements_indesirables")
+}
+
+// §13.4 — correction tracée d'une fiche EI (jamais de suppression).
+model CorrectionEi {
+  id           String   @id @default(cuid())
+  evenementId  String   @map("evenement_id")
+  auteurId     String   @map("auteur_id")
+  motif        String   @db.Text
+  valeursAvant Json     @map("valeurs_avant")
+  valeursApres Json     @map("valeurs_apres")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  evenement EvenementIndesirable @relation(fields: [evenementId], references: [id], onDelete: Cascade)
+  auteur    Utilisateur          @relation(fields: [auteurId], references: [id])
+
+  @@index([evenementId])
+  @@map("corrections_ei")
+}
+
+// RM8 — chaque transition de statut est historisée (qui/quand).
+model EvenementTransition {
+  id            String   @id @default(cuid())
+  evenementId   String   @map("evenement_id")
+  ancienStatut  StatutEi @map("ancien_statut")
+  nouveauStatut StatutEi @map("nouveau_statut")
+  utilisateurId String   @map("utilisateur_id")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  evenement   EvenementIndesirable @relation(fields: [evenementId], references: [id], onDelete: Cascade)
+  utilisateur Utilisateur          @relation(fields: [utilisateurId], references: [id])
+
+  @@index([evenementId])
+  @@map("evenement_transitions")
+}
+
+// Append-only (RM4, par analogie) — pas d'update/delete exposés côté API.
+model Cause {
+  id          String    @id @default(cuid())
+  evenementId String    @map("evenement_id")
+  type        TypeCause
+  // Cause identifiée (synthèse).
+  description String    @db.Text
+  // §8.2 — méthode guidée des « 5 pourquoi » : réponses successives.
+  pourquois   Json?
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  evenement EvenementIndesirable @relation(fields: [evenementId], references: [id], onDelete: Cascade)
+
+  @@index([evenementId])
+  @@map("causes")
+}
+
+model ActionCorrective {
+  id            String                 @id @default(cuid())
+  evenementId   String                 @map("evenement_id")
+  description   String                 @db.Text
+  responsableId String                 @map("responsable_id")
+  echeance      DateTime
+  statut        StatutActionCorrective @default(A_FAIRE)
+  createdAt     DateTime               @default(now()) @map("created_at")
+  updatedAt     DateTime               @updatedAt @map("updated_at")
+
+  evenement   EvenementIndesirable @relation(fields: [evenementId], references: [id], onDelete: Cascade)
+  responsable Utilisateur          @relation(fields: [responsableId], references: [id])
+
+  @@index([evenementId])
+  @@map("actions_correctives")
+}
+
+// 8.13 — pièces jointes uploadées vers Cloudinary (§11.1).
+model PieceJointe {
+  id            String   @id @default(cuid())
+  evenementId   String   @map("evenement_id")
+  url           String
+  cloudinaryId  String   @map("cloudinary_id")
+  nomFichier    String   @map("nom_fichier")
+  typeMime      String?  @map("type_mime")
+  tailleOctets  Int?     @map("taille_octets")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  evenement EvenementIndesirable @relation(fields: [evenementId], references: [id], onDelete: Cascade)
+
+  @@index([evenementId])
+  @@map("pieces_jointes")
+}
+
+// ---------------------------------------------------------------------------
+// Module 4 — Formations (payant à l'unité, RM5 : tarif figé au paiement,
+// RM11 : paiement KKiaPay toujours revérifié côté serveur)
+// ---------------------------------------------------------------------------
+
+model Formation {
+  id             String   @id @default(cuid())
+  titre          String
+  description    String   @db.Text
+  // §9 — objectifs de la formation (présentés au catalogue).
+  objectifs      String?  @db.Text
+  dureeHeures    Int?     @map("duree_heures")
+  prixIndividuel Int      @map("prix_individuel")
+  prixGroupe5    Int      @map("prix_groupe_5")
+  prixGroupe10   Int      @map("prix_groupe_10")
+  actif          Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  reservations Reservation[]
+
+  @@map("formations")
+}
+
+// RM5 — `tarifApplique` est une copie figée du tarif catalogue au moment de la
+// réservation (donc du paiement, les deux étant quasi simultanés côté widget) ;
+// il n'est jamais recalculé depuis `Formation`, même si le catalogue change ensuite.
+model Reservation {
+  id                   String            @id @default(cuid())
+  formationId          String            @map("formation_id")
+  utilisateurId        String            @map("utilisateur_id")
+  organisationId       String?           @map("organisation_id")
+  formule              FormuleFormation
+  tarifApplique        Int               @map("tarif_applique")
+  statut               StatutReservation @default(ATTENTE_PAIEMENT)
+  kkiapayTransactionId String?           @unique @map("kkiapay_transaction_id")
+  dateRdv              DateTime?         @map("date_rdv")
+  presenceConfirmee    Boolean           @default(false) @map("presence_confirmee")
+  // §12.5 — suivi des présences : nombre de participants présents à la session.
+  participantsPresents Int?              @map("participants_presents")
+  // §11.2 — rappel avant la session déjà envoyé.
+  rappelEnvoyeLe       DateTime?         @map("rappel_envoye_le")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+
+  formation    Formation     @relation(fields: [formationId], references: [id])
+  utilisateur  Utilisateur   @relation(fields: [utilisateurId], references: [id])
+  organisation Organisation? @relation(fields: [organisationId], references: [id])
+  facture      Facture?
+
+  @@index([organisationId])
+  @@index([utilisateurId])
+  @@index([statut])
+  @@map("reservations")
+}
+
+// §9.3 / §11.1 — facture d'une réservation OU d'un abonnement.
+model Facture {
+  id                   String   @id @default(cuid())
+  reservationId        String?  @unique @map("reservation_id")
+  paiementAbonnementId String?  @unique @map("paiement_abonnement_id")
+  numero               String   @unique
+  montant              Int
+  devise               String   @default("XOF")
+  emiseLe              DateTime @default(now()) @map("emise_le")
+  createdAt            DateTime @default(now()) @map("created_at")
+
+  reservation        Reservation?        @relation(fields: [reservationId], references: [id])
+  paiementAbonnement PaiementAbonnement? @relation(fields: [paiementAbonnementId], references: [id])
+
+  @@map("factures")
+}
+
+// Notifications in-app (§10.13) — distinctes des emails Brevo (src/notifications/) :
+// un flux court, propre à l'interface, marqué lu/non lu, sans dépendre d'un
+// fournisseur externe. Premier déclencheur : réservation passée à PAYEE,
+// à destination des ADMIN_PLATEFORME (action requise : fixer la date de RDV).
+model Notification {
+  id             String    @id @default(cuid())
+  destinataireId String    @map("destinataire_id")
+  type           String
+  titre          String
+  message        String
+  lienUrl        String?   @map("lien_url")
+  luLe           DateTime? @map("lu_le")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  destinataire Utilisateur @relation(fields: [destinataireId], references: [id], onDelete: Cascade)
+
+  @@index([destinataireId])
+  @@index([destinataireId, luLe])
+  @@map("notifications")
+}
+
+// D8 — système de paramètres plateforme. Volontairement réduit au strict
+// nécessaire : une seule ligne aujourd'hui (duree_essai_module_jours),
+// justifiée par RM6 ("essai gratuit... paramétrable") et vérifiée dans le
+// code (AbonnementsService lisait déjà process.env.DUREE_ESSAI_MODULE_JOURS,
+// mais uniquement au démarrage — jamais éditable à chaud). Portée plateforme
+// uniquement : aucun paramètre organisation n'est validé à ce jour, donc pas
+// de colonne organisationId ici (cf. §12 du rapport D8.0 — ne pas créer une
+// portée qui ne correspond à aucun besoin réel). Modification tracée via
+// JournalAudit existant, pas de colonne d'audit dédiée ici (évite la
+// duplication d'un mécanisme déjà en place).
+model ParametrePlateforme {
+  id           String   @id @default(cuid())
+  cle          String   @unique
+  valeur       String
+  type         String
+  description  String
+  valeurDefaut String   @map("valeur_defaut")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("parametres_plateforme")
+}
